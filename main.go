@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/ioutil"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,7 +18,6 @@ import (
 	"github.com/genuinetools/pkg/cli"
 	"github.com/jessfraz/bpfd/proc"
 	"github.com/sirupsen/logrus"
-	"github.com/tv42/httpunix"
 	"golang.org/x/sys/unix"
 )
 
@@ -36,7 +37,7 @@ func main() {
 	p.FlagSet = flag.NewFlagSet("ship", flag.ExitOnError)
 	p.FlagSet.BoolVar(&debug, "d", false, "enable debug logging")
 
-	// ignore SIGURG
+	// ignore SIGURG, handle Ctrl+C
 	sig := make(chan os.Signal)
 	signal.Notify(sig)
 	signal.Ignore(syscall.SIGURG)
@@ -124,9 +125,24 @@ func main() {
 }
 
 func walkpath(path string, info os.FileInfo, err error) error {
+	if debug {
+		fmt.Printf("Attempting Path %s\n", path)
+	}
+
+	switch path {
+	case "/sys":
+		fallthrough
+	case "/proc":
+		fallthrough
+	case "/etc/ssl":
+		fallthrough
+	case "/dev":
+		return filepath.SkipDir
+	}
+
 	if err != nil {
 		if debug {
-			fmt.Println(err)
+			fmt.Println(err.Error())
 		}
 	} else {
 		switch mode := info.Mode(); {
@@ -138,6 +154,8 @@ func walkpath(path string, info os.FileInfo, err error) error {
 			if err == nil {
 				if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
 					fmt.Println("Valid Docker Socket: " + path)
+					body, _ := ioutil.ReadAll(resp.Body)
+					fmt.Println("Docker Info:\n", string(body))
 				} else {
 					if debug {
 						fmt.Println("Invalid Docker Socket: " + path)
@@ -149,12 +167,10 @@ func walkpath(path string, info os.FileInfo, err error) error {
 					fmt.Println("Invalid Docker Socket: " + path)
 				}
 			}
-		default:
-			if debug {
-				fmt.Println("Invalid Socket: " + path)
-			}
 		}
 	}
+
+	time.Sleep(5)
 	return nil
 }
 
@@ -173,16 +189,16 @@ func checkSock(path string) (*http.Response, error) {
 	if debug {
 		fmt.Println("[-] Checking Sock for HTTP: " + path)
 	}
-	u := &httpunix.Transport{
-		DialTimeout:           100 * time.Millisecond,
-		RequestTimeout:        1 * time.Second,
-		ResponseHeaderTimeout: 1 * time.Second,
-	}
-	u.RegisterLocation("dockerd", path)
+
 	client := http.Client{
-		Transport: u,
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", path)
+			},
+		},
+		Timeout: 100 * time.Millisecond,
 	}
-	resp, err := client.Get("http+unix://dockerd/info")
+	resp, err := client.Get("http://unix" + "/info")
 
 	if resp == nil {
 		return nil, err
@@ -218,6 +234,10 @@ func seccompIter() {
 			continue
 		}
 
+		if debug {
+			fmt.Printf("Attempting Syscall %d\n", id)
+		}
+
 		// The call may block, so invoke asynchronously and rely on rejections being fast.
 		errs := make(chan error)
 		go func() {
@@ -239,6 +259,7 @@ func seccompIter() {
 			allowed = append(allowed, syscallName(id))
 		}
 
+		time.Sleep(5)
 	}
 
 	if debug && len(allowed) > 0 {
