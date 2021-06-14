@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -19,9 +20,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var (
-	debug bool
-)
+var debug bool
 
 func main() {
 	// Create a new cli program.
@@ -36,6 +35,20 @@ func main() {
 	// Setup the global flags.
 	p.FlagSet = flag.NewFlagSet("ship", flag.ExitOnError)
 	p.FlagSet.BoolVar(&debug, "d", false, "enable debug logging")
+
+	// ignore SIGURG
+	sig := make(chan os.Signal)
+	signal.Notify(sig)
+	signal.Ignore(syscall.SIGURG)
+	go func() {
+		for {
+			select {
+			case s := <-sig:
+				fmt.Printf("fatal: signal %s received\n", s)
+				os.Exit(1)
+			}
+		}
+	}()
 
 	// Set the before function.
 	p.Before = func(ctx context.Context) error {
@@ -157,7 +170,6 @@ func getValidSockets(startPath string) ([]string, error) {
 }
 
 func checkSock(path string) (*http.Response, error) {
-
 	if debug {
 		fmt.Println("[-] Checking Sock for HTTP: " + path)
 	}
@@ -167,7 +179,7 @@ func checkSock(path string) (*http.Response, error) {
 		ResponseHeaderTimeout: 1 * time.Second,
 	}
 	u.RegisterLocation("dockerd", path)
-	var client = http.Client{
+	client := http.Client{
 		Transport: u,
 	}
 	resp, err := client.Get("http+unix://dockerd/info")
@@ -182,7 +194,7 @@ func seccompIter() {
 	allowed := []string{}
 	blocked := []string{}
 
-	//fmt.Println("Checking available syscalls...")
+	// fmt.Println("Checking available syscalls...")
 
 	for id := 0; id <= unix.SYS_RSEQ; id++ {
 		// these cause a hang, so just skip
