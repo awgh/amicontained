@@ -2,9 +2,8 @@ package main
 
 import (
 	"context"
-	"flag"
-	"fmt"
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -14,28 +13,20 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/genuinetools/amicontained/version"
-	"github.com/genuinetools/pkg/cli"
-	"github.com/jessfraz/bpfd/proc"
-	"github.com/sirupsen/logrus"
+	"github.com/akamensky/argparse"
+	"github.com/genuinetools/bpfd/proc"
 	"golang.org/x/sys/unix"
 )
 
 var debug bool
 
 func main() {
-	// Create a new cli program.
-	p := cli.NewProgram()
-	p.Name = "amicontained"
-	p.Description = "A container introspection tool"
-
-	// Set the GitCommit and Version.
-	p.GitCommit = version.GITCOMMIT
-	p.Version = version.VERSION
-
-	// Setup the global flags.
-	p.FlagSet = flag.NewFlagSet("ship", flag.ExitOnError)
-	p.FlagSet.BoolVar(&debug, "d", false, "enable debug logging")
+	parser := argparse.NewParser("amicontained", "A container introspection tool")
+	debug = *(parser.Flag("d", "debug", &argparse.Options{Required: false, Help: "enable debug logging"}))
+	if err := parser.Parse(os.Args); err != nil {
+		log.Println(parser.Usage(err))
+		return
+	}
 
 	// ignore SIGURG, handle Ctrl+C
 	sig := make(chan os.Signal)
@@ -45,89 +36,71 @@ func main() {
 		for {
 			select {
 			case s := <-sig:
-				fmt.Printf("fatal: signal %s received\n", s)
+				log.Printf("fatal: signal %s received\n", s)
 				os.Exit(1)
 			}
 		}
 	}()
 
-	// Set the before function.
-	p.Before = func(ctx context.Context) error {
-		// Set the log level.
-		if debug {
-			logrus.SetLevel(logrus.DebugLevel)
-		}
+	// Container Runtime
+	runtime := proc.GetContainerRuntime(0, 0)
+	log.Printf("Container Runtime: %s\n", runtime)
 
-		return nil
-	}
-
-	// Set the main program action.
-	p.Action = func(ctx context.Context, args []string) error {
-		// Container Runtime
-		runtime := proc.GetContainerRuntime(0, 0)
-		fmt.Printf("Container Runtime: %s\n", runtime)
-
-		// Namespaces
-		namespaces := []string{"pid"}
-		fmt.Println("Has Namespaces:")
-		for _, namespace := range namespaces {
-			ns, err := proc.HasNamespace(namespace)
-			if err != nil {
-				fmt.Printf("\t%s: error -> %v\n", namespace, err)
-				continue
-			}
-			fmt.Printf("\t%s: %t\n", namespace, ns)
-		}
-
-		// User Namespaces
-		userNS, userMappings := proc.GetUserNamespaceInfo(0)
-		fmt.Printf("\tuser: %t\n", userNS)
-		if len(userMappings) > 0 {
-			fmt.Println("User Namespace Mappings:")
-			for _, userMapping := range userMappings {
-				fmt.Printf("\tContainer -> %d\tHost -> %d\tRange -> %d\n", userMapping.ContainerID, userMapping.HostID, userMapping.Range)
-			}
-		}
-
-		// AppArmor Profile
-		aaprof := proc.GetAppArmorProfile(0)
-		fmt.Printf("AppArmor Profile: %s\n", aaprof)
-
-		// Capabilities
-		caps, err := proc.GetCapabilities(0)
+	// Namespaces
+	namespaces := []string{"pid"}
+	log.Println("Has Namespaces:")
+	for _, namespace := range namespaces {
+		ns, err := proc.HasNamespace(namespace)
 		if err != nil {
-			logrus.Warnf("getting capabilities failed: %v", err)
+			log.Printf("\t%s: error -> %v\n", namespace, err)
+			continue
 		}
-		if len(caps) > 0 {
-			fmt.Println("Capabilities:")
-			for k, v := range caps {
-				if len(v) > 0 {
-					fmt.Printf("\t%s -> %s\n", k, strings.Join(v, " "))
-				}
-			}
-		}
-
-		// Seccomp
-		seccompMode := proc.GetSeccompEnforcingMode(0)
-		fmt.Printf("Seccomp: %s\n", seccompMode)
-
-		seccompIter()
-
-		// Docker.sock
-		fmt.Println("Looking for Docker.sock")
-		getValidSockets("/")
-
-		return nil
+		log.Printf("\t%s: %t\n", namespace, ns)
 	}
 
-	// Run our program.
-	p.Run()
+	// User Namespaces
+	userNS, userMappings := proc.GetUserNamespaceInfo(0)
+	log.Printf("\tuser: %t\n", userNS)
+	if len(userMappings) > 0 {
+		log.Println("User Namespace Mappings:")
+		for _, userMapping := range userMappings {
+			log.Printf("\tContainer -> %d\tHost -> %d\tRange -> %d\n", userMapping.ContainerID, userMapping.HostID, userMapping.Range)
+		}
+	}
+
+	// AppArmor Profile
+	aaprof := proc.GetAppArmorProfile(0)
+	log.Printf("AppArmor Profile: %s\n", aaprof)
+
+	// Capabilities
+	caps, err := proc.GetCapabilities(0)
+	if err != nil {
+		log.Printf("getting capabilities failed: %v", err)
+	}
+	if len(caps) > 0 {
+		log.Println("Capabilities:")
+		for k, v := range caps {
+			if len(v) > 0 {
+				log.Printf("\t%s -> %s\n", k, strings.Join(v, " "))
+			}
+		}
+	}
+
+	// Seccomp
+	seccompMode := proc.GetSeccompEnforcingMode(0)
+	log.Printf("Seccomp: %s\n", seccompMode)
+
+	seccompIter()
+
+	// Docker.sock
+	log.Println("Looking for Docker.sock")
+	getValidSockets("/")
 }
 
 func walkpath(path string, info os.FileInfo, err error) error {
-	if debug {
-		fmt.Printf("Attempting Path %s\n", path)
-	}
+	//if debug {
+	//	log.Printf("Attempting Path %s\n", path)
+	//}
 
 	switch path {
 	case "/sys":
@@ -142,35 +115,33 @@ func walkpath(path string, info os.FileInfo, err error) error {
 
 	if err != nil {
 		if debug {
-			fmt.Println(err.Error())
+			log.Println(err.Error())
 		}
 	} else {
 		switch mode := info.Mode(); {
 		case mode&os.ModeSocket != 0:
 			if debug {
-				fmt.Println("Valid Socket: " + path)
+				log.Println("Valid Socket: " + path)
 			}
 			resp, err := checkSock(path)
 			if err == nil {
 				if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
-					fmt.Println("Valid Docker Socket: " + path)
+					log.Println("Valid Docker Socket: " + path)
 					body, _ := ioutil.ReadAll(resp.Body)
-					fmt.Println("Docker Info:\n", string(body))
+					log.Println("Docker Info:\n", string(body))
 				} else {
 					if debug {
-						fmt.Println("Invalid Docker Socket: " + path)
+						log.Println("Invalid Docker Socket: " + path)
 					}
 				}
 				defer resp.Body.Close()
 			} else {
 				if debug {
-					fmt.Println("Invalid Docker Socket: " + path)
+					log.Println("Invalid Docker Socket: " + path)
 				}
 			}
 		}
 	}
-
-	time.Sleep(5)
 	return nil
 }
 
@@ -178,7 +149,7 @@ func getValidSockets(startPath string) ([]string, error) {
 	err := filepath.Walk(startPath, walkpath)
 	if err != nil {
 		if debug {
-			fmt.Println(err)
+			log.Println(err)
 		}
 		return nil, err
 	}
@@ -187,7 +158,7 @@ func getValidSockets(startPath string) ([]string, error) {
 
 func checkSock(path string) (*http.Response, error) {
 	if debug {
-		fmt.Println("[-] Checking Sock for HTTP: " + path)
+		log.Println("[-] Checking Sock for HTTP: " + path)
 	}
 
 	client := http.Client{
@@ -196,7 +167,7 @@ func checkSock(path string) (*http.Response, error) {
 				return net.Dial("unix", path)
 			},
 		},
-		Timeout: 100 * time.Millisecond,
+		Timeout: 1 * time.Second,
 	}
 	resp, err := client.Get("http://unix" + "/info")
 
@@ -209,8 +180,6 @@ func checkSock(path string) (*http.Response, error) {
 func seccompIter() {
 	allowed := []string{}
 	blocked := []string{}
-
-	// fmt.Println("Checking available syscalls...")
 
 	for id := 0; id <= unix.SYS_RSEQ; id++ {
 		// these cause a hang, so just skip
@@ -234,10 +203,6 @@ func seccompIter() {
 			continue
 		}
 
-		if debug {
-			fmt.Printf("Attempting Syscall %d\n", id)
-		}
-
 		// The call may block, so invoke asynchronously and rely on rejections being fast.
 		errs := make(chan error)
 		go func() {
@@ -248,8 +213,11 @@ func seccompIter() {
 		var err error
 		select {
 		case err = <-errs:
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(2 * time.Second):
 			// The syscall was allowed, but it didn't return
+			if debug {
+				log.Printf("Timeout on %d\n", id)
+			}
 		}
 
 		// check both EPERM and EACCES - LXC returns EACCES and Docker EPERM
@@ -258,18 +226,16 @@ func seccompIter() {
 		} else if err != syscall.EOPNOTSUPP {
 			allowed = append(allowed, syscallName(id))
 		}
-
-		time.Sleep(5)
 	}
 
-	if debug && len(allowed) > 0 {
-		fmt.Printf("Allowed Syscalls (%d):\n", len(allowed))
-		fmt.Printf("\t%s\n", strings.Join(allowed, " "))
+	if len(allowed) > 0 {
+		log.Printf("Allowed Syscalls (%d):\n", len(allowed))
+		log.Printf("\t%s\n", strings.Join(allowed, " "))
 	}
 
 	if len(blocked) > 0 {
-		fmt.Printf("Blocked Syscalls (%d):\n", len(blocked))
-		fmt.Printf("\t%s\n", strings.Join(blocked, " "))
+		log.Printf("Blocked Syscalls (%d):\n", len(blocked))
+		log.Printf("\t%s\n", strings.Join(blocked, " "))
 	}
 }
 
@@ -946,5 +912,5 @@ func syscallName(e int) string {
 	case unix.SYS_RSEQ:
 		return "RSEQ"
 	}
-	return fmt.Sprintf("%d - ERR_UNKNOWN_SYSCALL", e)
+	return "UNKNOWN_SYSCALL"
 }

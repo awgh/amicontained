@@ -1,18 +1,9 @@
 module github.com/genuinetools/amicontained
 
-require (
-	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/genuinetools/pkg v0.0.0-20180910213200-1c141f661797
-	github.com/jessfraz/bpfd v0.0.0-20180918065159-854869239e70
-	github.com/onsi/gomega v1.4.2 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/sirupsen/logrus v1.0.6
-	github.com/stretchr/testify v1.2.2 // indirect
-	github.com/syndtr/gocapability v0.0.0-20180916011248-d98352740cb2
-	golang.org/x/crypto v0.0.0-20180910181607-0e37d006457b
-	golang.org/x/sys v0.0.0-20180925112736-b09afc3d579e
-	gopkg.in/airbrake/gobrake.v2 v2.0.9 // indirect
-	gopkg.in/gemnasium/logrus-airbrake-hook.v2 v2.1.2 // indirect
-)
+go 1.16
 
-go 1.13
+require (
+	github.com/akamensky/argparse v1.3.0
+	github.com/genuinetools/bpfd v0.0.1
+	golang.org/x/sys v0.0.0-20210611083646-a4fc73990273
+)
