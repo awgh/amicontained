@@ -28,10 +28,11 @@ func main() {
 		return
 	}
 
-	// ignore SIGURG, handle Ctrl+C
+	// ignore SIGURG and SIGWINCH, handle Ctrl+C
 	sig := make(chan os.Signal)
 	signal.Notify(sig)
 	signal.Ignore(syscall.SIGURG)
+	signal.Ignore(syscall.SIGWINCH)
 	go func() {
 		for {
 			select {

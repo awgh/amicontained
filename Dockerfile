@@ -18,7 +18,7 @@ RUN set -x \
 		libgcc \
 		make \
 	&& cd /go/src/github.com/genuinetools/amicontained \
-	&& make static \
+	&& CGO_ENABLED=0 go build -ldflags "-s -w" \
 	&& mv amicontained /usr/bin/amicontained \
 	&& apk del .build-deps \
 	&& rm -rf /go \
@@ -30,4 +30,4 @@ COPY --from=builder /usr/bin/amicontained /usr/bin/amicontained
 COPY --from=builder /etc/ssl/certs/ /etc/ssl/certs
 
 ENTRYPOINT [ "amicontained" ]
-CMD [ "--help" ]
+#CMD [ "--help" ]
